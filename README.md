@@ -11,86 +11,120 @@ To perform real-time object detection using a trained YOLO v4 model through your
 ```python
 import cv2
 import numpy as np
+import time
+from IPython.display import display, clear_output
+import matplotlib.pyplot as plt
 
 # Load YOLOv4 network
 net = cv2.dnn.readNet("yolov4.weights", "yolov4.cfg")
 
-# Load the COCO class labels
+# Load COCO class labels
 with open("coco.names", "r") as f:
     classes = [line.strip() for line in f.readlines()]
 
+# Output layer names
 layer_names = net.getLayerNames()
 output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers().flatten()]
 
-# Set up video capture for webcam
+# Colors for each class
+colors = np.random.uniform(0, 255, size=(len(classes), 3))
+
+# Set up webcam
 cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    print("Cannot open webcam")
+    exit()
 
-while True:
-    ret, frame = cap.read()
-    height, width, channels = frame.shape
+prev_time = 0
+last_frame = None  # store last frame
 
-    # Prepare the image for YOLOv4
-    blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416), swapRB=True, crop=False)
-    net.setInput(blob)
-    
-    # Get YOLO output
-    outputs = net.forward(output_layers)
-    
-    # Initialize lists to store detected boxes, confidences, and class IDs
-    boxes = []
-    confidences = []
-    class_ids = []
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
 
-    for output in outputs:
-        for detection in output:
-            scores = detection[5:]
-            class_id = np.argmax(scores)
-            confidence = scores[class_id]
-            if confidence > 0.5:
-                # Object detected
-                center_x = int(detection[0] * width)
-                center_y = int(detection[1] * height)
-                w = int(detection[2] * width)
-                h = int(detection[3] * height)
+        frame = cv2.resize(frame, (640, 480))
+        height, width, _ = frame.shape
 
-                # Calculate top-left corner of the box
-                x = int(center_x - w / 2)
-                y = int(center_y - h / 2)
+        # Prepare image for YOLOv4
+        blob = cv2.dnn.blobFromImage(frame, 1 / 255.0, (416, 416), swapRB=True, crop=False)
+        net.setInput(blob)
+        outputs = net.forward(output_layers)
 
-                boxes.append([x, y, w, h])
-                confidences.append(float(confidence))
-                class_ids.append(class_id)
+        boxes, confidences, class_ids = [], [], []
 
-    # Apply Non-Max Suppression to eliminate redundant overlapping boxes
-    indexes = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)
+        for output in outputs:
+            for detection in output:
+                scores = detection[5:]
+                class_id = np.argmax(scores)
+                confidence = scores[class_id]
+                if confidence > 0.5:
+                    center_x = int(detection[0] * width)
+                    center_y = int(detection[1] * height)
+                    w = int(detection[2] * width)
+                    h = int(detection[3] * height)
+                    x = max(0, int(center_x - w / 2))
+                    y = max(0, int(center_y - h / 2))
+                    boxes.append([x, y, w, h])
+                    confidences.append(float(confidence))
+                    class_ids.append(class_id)
 
-    # Draw bounding boxes and labels on the image
-    if len(indexes) > 0:
-        for i in indexes.flatten():
-            x, y, w, h = boxes[i]
-            label = str(classes[class_ids[i]])
-            confidence = confidences[i]
+        indexes = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)
 
-            color = (0, 255, 0)  # Green color for bounding boxes
-            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-            cv2.putText(frame, f"{label} {confidence:.2f}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        if len(indexes) > 0:
+            for i in indexes.flatten():
+                x, y, w, h = boxes[i]
+                label = str(classes[class_ids[i]])
+                confidence = confidences[i]
+                color = colors[class_ids[i]]
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+                cv2.putText(frame, f"{label} {confidence:.2f}", (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-    # Show the image with detected objects
-    cv2.imshow("YOLOv4 Real-Time Object Detection", frame)
+        # FPS calculation
+        curr_time = time.time()
+        fps = 1 / (curr_time - prev_time) if prev_time != 0 else 0
+        prev_time = curr_time
+        cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-    # Exit the loop if 'q' is pressed
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+        # Store last frame
+        last_frame = frame.copy()
 
-# Release video capture and close windows
-cap.release()
-cv2.destroyAllWindows()
+        # Convert BGR to RGB for display
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Display frame inline
+        clear_output(wait=True)
+        plt.imshow(frame_rgb)
+        plt.axis('off')
+        display(plt.gcf())
+
+        # Press "Stop" or interrupt kernel to stop
+        time.sleep(0.03)
+
+except KeyboardInterrupt:
+    print("Stopped by user")
+
+finally:
+    cap.release()
+    plt.close()
+
+    # Show last frame
+    if last_frame is not None:
+        last_rgb = cv2.cvtColor(last_frame, cv2.COLOR_BGR2RGB)
+        plt.imshow(last_rgb)
+        plt.axis('off')
+        plt.title("Last Captured Frame")
+        plt.show()
+
 
 ```
 
 # OUTPUT:
 
-<img width="796" height="638" alt="image" src="https://github.com/user-attachments/assets/38d726ef-61ef-49c9-9d29-99c70faccb79" />
-
+<img width="621" height="495" alt="image" src="https://github.com/user-attachments/assets/2dde7531-3e62-498d-9cd5-50feaf3d9f1a" />
 
  
